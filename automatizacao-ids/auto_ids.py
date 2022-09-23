@@ -9,8 +9,8 @@ import sheets
 
 
 def get_og_df():
-  secret_path = '/content/gspread-analytics-358422-fb514ed76c5f.json'
-  sh_ids = sheets.init_sheets(secret_path, '1H3do6uz0oFyykQCnnX4BRNti9OwQEc9JUaTzqSX4os4')
+  secret_path = 'path/to/secret'
+  sh_ids = sheets.init_sheets(secret_path, 'sheets-key')
   ws = sh_ids.get_worksheet(0)
   df = sheets.sheets_to_dataframe(ws)
 

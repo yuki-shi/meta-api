@@ -5,7 +5,7 @@ from gspread_dataframe import set_with_dataframe
 from auto_ids import *
 
 def main():
-  with open('/content/meta-secret.json', 'r') as f:
+  with open('path/to/secret.json', 'r') as f:
     secret = json.load(f)
 
   for key, item in secret.items():
