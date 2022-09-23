@@ -5,10 +5,8 @@ import datetime as dt
 import re
 import time
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
+from oauth2client.service_account import ServiceAccountCredentials
+import gspread
 
 # Formata o timestamp para datetime
 def format_timestamp(df):
@@ -34,14 +32,13 @@ def format_dataframe(df):
 def date_to_unix(date):
   return time.mktime(date.timetuple())
 
-class Meta():
-  def __init__(self):
-    self.token = os.environ['TOKEN']
-    self.client_id = os.environ['CLIENT_ID']
-    self.client_secret = os.environ['CLIENT_SECRET']
+class Instagram():
+  def __init__(self, token, client_id, client_secret, ig_id):
+    self.token = token
+    self.client_id = client_id
+    self.client_secret = client_secret
     self.endpoint = 'https://graph.facebook.com/v14.0' 
-    self.fb_id = os.environ['FB_ID']
-    self.ig_id = os.environ['IG_ID']
+    self.ig_id = ig_id
 
   # === === ===
   # Meta - Instagram
@@ -51,21 +48,6 @@ class Meta():
    url = f"{self.endpoint}/oauth/access_token?grant_type=fb_exchange_token&client_id={self.client_id}&client_secret={self.client_secret}&fb_exchange_token={self.token}"
 
    return json.loads(requests.get(url).text)
-
-  # Retorna DataFrame contendo midias postadas no Insta em um range de datas
-  def get_ig_data(self, data_inicial, data_final):
-    url = f'{self.endpoint}/{self.ig_id}/media'
-
-    params = {
-        'fields': 'id,caption,media_type,media_url,permalink,timestamp',
-        'since': data_inicial,
-        'until': data_final,
-        'limit': 50,
-        'access_token': self.token
-    }
-
-    response = json.loads(requests.get(url, params).text)
-    return (pd.DataFrame(response['data']))
 
   # Retorna DataFrame contendo performance de reels
   def get_reels_data(self, id):
@@ -108,7 +90,7 @@ class Meta():
 
     params = {
         'metric': 'exits,impressions,reach,replies,taps_forward,taps_back',
-        'access_token': self.token
+        'access_token': insta.token
     }
 
     response = json.loads(requests.get(url, params).text)
@@ -137,54 +119,52 @@ class Meta():
       else:
         raise Exception('Yuki não fez :)')
 
+    # Reels
     for key, df in reels.items():
       df.iloc[0, 0] = key
-      df.rename(columns={'name': 'id'}, inplace=True)
-      reels_f.append(df)
-
-    for key, df in carousel.items():
-      df.iloc[0, 0] = key
       df.rename(columns={'name': 'id',
-                        'carousel_album_engagement': 'engagement',
-                        'carousel_album_impressions': 'plays',
-                        'carousel_album_reach': 'reach',
-                        'carousel_album_saved': 'saved'}, inplace=True)
-      carousel_f.append(df)
-
-    for key, df in image.items():
-      df.iloc[0, 0] = key
-      df.rename(columns={'name': 'id'}, inplace=True)
-      image_f.append(df)
-
-    if len(carousel_f) > 0:
-      df_carousel_final = pd.concat(carousel_f, axis=0, ignore_index=True)
-      df_carousel_final['engagement'] += df_carousel_final['saved']
+                         'plays': 'impressions'}, inplace=True)
+      reels_f.append(df)
 
     if len(reels_f) > 0:
       df_reels_final = pd.concat(reels_f, axis=0, ignore_index=True)
       df_reels_final['engagement'] = df_reels_final['comments'] + df_reels_final['likes'] + df_reels_final['saved']
 
+    # Carrossel
+    for key, df in carousel.items():
+      df.iloc[0, 0] = key
+      df.rename(columns={'name': 'id',
+                        'carousel_album_engagement': 'engagement',
+                        'carousel_album_impressions': 'impressions',
+                        'carousel_album_reach': 'reach',
+                        'carousel_album_saved': 'saved'}, inplace=True)
+      carousel_f.append(df)
+    
+    if len(carousel_f) > 0:
+      df_carousel_final = pd.concat(carousel_f, axis=0, ignore_index=True)
+      df_carousel_final['engagement'] += df_carousel_final['saved']
+
+    # Imagem
+    for key, df in image.items():
+      df.iloc[0, 0] = key
+      df.rename(columns={'name': 'id'}, inplace=True)
+      image_f.append(df)
+
     if len(image_f) > 0:
       df_image_final = pd.concat(image_f, axis=0, ignore_index=True)
       df_image_final['engagement'] += df_image_final['saved']
 
+
     df_final = pd.concat([df_carousel_final, df_reels_final, df_image_final])
 
-    return df_final
+    dfs = {
+        'carousel': df_carousel_final,
+        'reels': df_reels_final,
+        'image': df_image_final,
+        'merged': df_final
+    }
 
-  def get_stories_performance(self, ids):
-    stories = {}
-    stories_f = []
-
-    for id in ids:
-      stories[id] = format_dataframe(self.get_stories_data(id))
-
-    for key, value in stories.items():
-      stories.iloc[0, 0] = key
-      stories.rename(columns={'name': 'id'}, inplace=True)
-      stories.append(stories)
-
-    return pd.concat(stories_f, axis=0, ignore_index=True)
+    return dfs
 
   # Retorna performance geral da página
   def get_ig_page_data(self, data_inicial, data_final):
@@ -228,40 +208,3 @@ class Meta():
 
     response = json.loads(requests.get(url, params).text)
     return pd.DataFrame(response['data'])
-
-    # === === === 
-    # Meta - Facebook
-    # === === ===
-
-  def get_fb_posts(self):
-    posts = json.loads(requests.get(f'{self.endpoint}/{self.fb_id}/posts?access_token={self.access_token}&limit=100').text)
-    df = pd.DataFrame(posts['data'])
-    df['created_time'] = pd.to_datetime(df['created_time'])
-    df['created_time'] = df['created_time'].apply(lambda x: x.strftime('%Y-%m-%d'))
-
-    return df
-
-  def get_post_data(self, id):
-    url = f'{self.endpoint}/{id}/insights'
-
-    params = {
-        'metric': 'post_clicks,post_clicks_unique,post_impressions,post_impressions_unique,post_engaged_users',
-        'access_token': access_token
-    }
-
-    response = json.loads(requests.get(url, params).text)
-    df = pd.DataFrame(response['data'])
-    return format_dataframe(df)
-
-  def get_post_performance(self, df):
-    posts = []
-
-    for message, id in zip(df['message'], df['id']):
-      df = self.get_post_data(id)
-      df['message'] = message
-      df.drop('name', axis=1, inplace=True)
-      df['url'] = f'https://facebook.com/{re.findall(r"(?<=_).*", id)[0]}'
-      
-      posts.append(df)
-
-    return pd.concat(posts, axis=0, ignore_index=True)
