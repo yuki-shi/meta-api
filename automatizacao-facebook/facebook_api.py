@@ -17,11 +17,24 @@ class Facebook():
     df = df[['name', 'values']]
     df.loc[:, 'values'] = [re.findall(r'(?<=: ).*(?=})', str(x)) for x in df['values']]
     df.loc[:, 'values'] = [re.sub("[\[\]']", '', str(x)) for x in df['values']]
+
+    reactions = df.loc[df['name'] == 'post_reactions_by_type_total', 'values'].values
+    reactions = reactions[0].split(', ')
+    reactions = [re.findall(r'(?<=: ).*', x) for x in reactions]
+    reactions[-1][0] = re.sub(r'[}"]', '', reactions[-1][0])
+    reactions = [item for sublist in reactions for item in sublist]
+    reactions = [int(x) for x in reactions]
+    reactions_total = sum(reactions)
+    df.loc[df['name'] == 'post_reactions_by_type_total', 'values'] = reactions_total
+
     df['values'] = df['values'].astype(int)
     df = df.transpose().reset_index()
     header = df.iloc[0, :]
     df.columns = header
-    df.drop(df.index[0], inplace=True)
+    df = df.drop(df.index[0])
+
+    df = df.rename(columns={'post_reactions_by_type_total': 'reactions'})
+    df['engagement'] = df['post_clicks'] + df['reactions']
 
     return df
 
@@ -51,7 +64,7 @@ class Facebook():
     url = f'{self.endpoint}/{id}/insights'
 
     params = {
-        'metric': 'post_clicks,post_clicks_unique,post_impressions,post_impressions_unique,post_engaged_users',
+        'metric': 'post_clicks,post_clicks_unique,post_impressions,post_impressions_unique,post_engaged_users,post_reactions_by_type_total',
         'access_token': self.token
     }
 

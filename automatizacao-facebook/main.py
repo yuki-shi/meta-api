@@ -6,7 +6,7 @@ from gspread_dataframe import set_with_dataframe
 import pandas_gbq
 from google.oauth2 import service_account
 import sheets
-from facebookapi import Facebook
+from facebook_api import Facebook
 
 def main():
   # Inicialização do BigQuery
