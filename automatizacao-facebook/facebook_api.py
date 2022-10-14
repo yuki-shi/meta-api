@@ -10,31 +10,15 @@ class Facebook():
     self.client_id = os.environ['CLIENT_ID']
     self.client_secret = os.environ['CLIENT_SECRET']
     self.fb_id = os.environ['FB_ID']
-    self.endpoint = 'https://graph.facebook.com/v14.0'
+    self.endpoint = 'https://graph.facebook.com/v15.0'
 
   @staticmethod
   def format_dataframe(df):
-    df = df[['name', 'values']]
-    df.loc[:, 'values'] = [re.findall(r'(?<=: ).*(?=})', str(x)) for x in df['values']]
-    df.loc[:, 'values'] = [re.sub("[\[\]']", '', str(x)) for x in df['values']]
-
-    reactions = df.loc[df['name'] == 'post_reactions_by_type_total', 'values'].values
-    reactions = reactions[0].split(', ')
-    reactions = [re.findall(r'(?<=: ).*', x) for x in reactions]
-    reactions[-1][0] = re.sub(r'[}"]', '', reactions[-1][0])
-    reactions = [item for sublist in reactions for item in sublist]
-    reactions = [int(x) for x in reactions]
-    reactions_total = sum(reactions)
-    df.loc[df['name'] == 'post_reactions_by_type_total', 'values'] = reactions_total
-
     df['values'] = df['values'].astype(int)
     df = df.transpose().reset_index()
     header = df.iloc[0, :]
     df.columns = header
     df = df.drop(df.index[0])
-
-    df = df.rename(columns={'post_reactions_by_type_total': 'reactions'})
-    df['engagement'] = df['post_clicks'] + df['reactions']
 
     return df
 
@@ -43,7 +27,7 @@ class Facebook():
 
     params = {
         'access_token': self.token,
-        'fields': 'permalink_url,created_time,message,id',
+        'fields': 'permalink_url,created_time,message,shares,id',
         'since': data_inicial,
         'limit': 100
     }
@@ -54,9 +38,14 @@ class Facebook():
 
     if len(posts['data']) == 0:
       raise Exception('Sem posts novos!')
-    
+
     df = pd.DataFrame(posts['data'])
+    df['shares'] = (df['shares'].astype(str)
+                                .str.extract(r'([0-9]+)')
+                                .fillna(0)
+                                .astype(int))
     df['created_time'] = pd.to_datetime(df['created_time'])
+    df['created_time'] -= dt.timedelta(hours=3) # Para GMT-03:00
 
     return df
 
@@ -69,19 +58,51 @@ class Facebook():
     }
 
     response = requests.get(url, params)
-    response.raise_for_status()
-    response = json.loads(response.text)
+    response_f = json.loads(response.text)
+    data = {} 
 
-    df = pd.DataFrame(response['data'])
-    return self.format_dataframe(df)
+    if response.status_code == 400:
+      data['post_clicks'] = 0
+      data['post_clicks_unique'] = 0
+      data['post_impressions'] = 0
+      data['post_impressions_unique'] = 0
+      data['post_engaged_users'] = 0
+      data['reactions_total'] = 0
+
+      return pd.DataFrame(data, index=[0])
+     
+    for entry in response_f['data']:
+      if entry['name'] != 'post_reactions_by_type_total':
+        data[entry['name']] = entry['values'][0]['value']
+      else:
+        data['reactions_total'] = sum(entry['values'][0]['value'].values())
+
+    return pd.DataFrame(data, index=[0])
+
+  def get_post_comments(self, id):
+    url = f'{self.endpoint}/{id}/comments'
+
+    params = {
+        'access_token': self.token,
+        'summary': 1
+    }
+
+    response = requests.get(url, params)
+    response_f = json.loads(response.text)
+
+    if response.status_code == 400:
+      return 0
+
+    return response_f['summary']['total_count']
 
   def get_post_performance(self, df):
     posts = []
 
     for id in df['id']:
       df = self.get_post_data(id)
+      df['comments'] = self.get_post_comments(id)
+      df['engagement'] = df['post_clicks'] + df['reactions_total'] + df['comments']
       df['id'] = id
-      df = df.drop('name', axis=1)
       
       posts.append(df)
 
