@@ -46,7 +46,8 @@ class Facebook():
                                 .astype(int))
     df['created_time'] = pd.to_datetime(df['created_time'])
     df['created_time'] -= dt.timedelta(hours=3) # Para GMT-03:00
-
+    df['created_time'] = df['created_time'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
     return df
 
   def get_post_data(self, id):
